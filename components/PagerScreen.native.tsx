@@ -12,7 +12,6 @@ import { ColorSchemeName, StyleSheet, useColorScheme, useWindowDimensions, View 
 import { Haptics } from 'react-native-nitro-haptics'
 import PagerView, { PagerViewOnPageScrollEventData } from 'react-native-pager-view'
 import Animated, { interpolate, SharedValue, useAnimatedProps, useAnimatedStyle, useSharedValue } from 'react-native-reanimated'
-import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg'
 
 // Context to share scroll position between PagerContent and header
 export const ScrollPositionContext = createContext<SharedValue<number> | null>(null)
@@ -150,33 +149,6 @@ function AnimatedMeshBackground({ scrollPosition }: { scrollPosition: SharedValu
   )
 }
 
-function AnimatedChatGradient({ scrollPosition }: { scrollPosition: SharedValue<number> }) {
-  const { width: screenWidth } = useWindowDimensions()
-  const colorScheme = useColorScheme()
-  const isDark = colorScheme === 'dark'
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    // scrollPosition 1 = Chat (fully visible), fade out when swiping away
-    opacity: interpolate(Math.abs(scrollPosition.value - 1), [0, 1], [1, 0], 'clamp'),
-  }))
-
-  return (
-    <Animated.View
-      style={[{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 100 }, animatedStyle]}
-      pointerEvents="none"
-    >
-      <Svg style={{ width: screenWidth, height: 100 }}>
-        <Defs>
-          <RadialGradient id="chatGrad" cx="50%" cy="100%" r="100%">
-            <Stop offset="0%" stopColor={isDark ? colors.dark.primary : colors.light.primary} stopOpacity="0.3" />
-            <Stop offset="100%" stopColor={isDark ? colors.dark.background : colors.light.background} stopOpacity="0" />
-          </RadialGradient>
-        </Defs>
-        <Rect x="0" y="0" width="100%" height="100%" fill="url(#chatGrad)" />
-      </Svg>
-    </Animated.View>
-  )
-}
 
 const AppStack = createNativeStackNavigator()
 
@@ -363,7 +335,6 @@ export default function PagerScreen() {
             </AppStack.Navigator>
           </NavigationContainer>
         </NavigationIndependentTree>
-        <AnimatedChatGradient scrollPosition={scrollPosition} />
       </View>
     </ScrollPositionContext.Provider>
   )

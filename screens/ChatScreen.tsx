@@ -1,6 +1,5 @@
 import { AnimatedInput, type AnimatedInputRef, ClarificationCard, EmptyStateCarousels, FoodConfirmationCard, type FoodConfirmationEntry, MessageBubble, MIN_INPUT_HEIGHT, ToolActivityIndicator } from '@/components/chat'
 import { VoiceOverlay } from '@/components/chat/VoiceOverlay'
-import { colors } from '@/constants/colors'
 import { useVoiceChat } from '@/hooks/useVoiceChat'
 import { generateAPIUrl } from '@/utils'
 import { getDailyLog, getUserGoals } from '@/lib/storage'
@@ -14,13 +13,13 @@ import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } fro
 import { fetch as expoFetch } from 'expo/fetch'
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Haptics } from 'react-native-nitro-haptics'
-import { Keyboard, Pressable, useColorScheme, View } from 'react-native'
+import { Keyboard, Pressable, useWindowDimensions, View } from 'react-native'
 import { Text } from '@/components/ui/Text'
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller'
 import type { SharedValue } from 'react-native-reanimated'
-import Animated, { SlideInUp, useAnimatedStyle } from 'react-native-reanimated'
+import Animated, { SlideInUp, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { LinearGradient } from 'expo-linear-gradient'
+import { AudioGradientOrb } from '@/components/chat/AudioGradientOrb'
 
 /** Generate a creative meal title from food names */
 async function generateMealTitle(foodNames: string[]): Promise<string | null> {
@@ -94,6 +93,7 @@ export default function ChatScreen() {
   } | null>(null)
   const [clarificationDismissing, setClarificationDismissing] = useState(false)
   const [voiceMode, setVoiceMode] = useState(false)
+  const [isMuted, setIsMuted] = useState(false)
   const [lastAssistantText, setLastAssistantText] = useState('')
   const prevMessageCountRef = useRef(0)
   const processedToolCallsRef = useRef<Set<string>>(new Set())
@@ -103,12 +103,12 @@ export default function ChatScreen() {
   const pendingClarificationRef = useRef<typeof pendingClarification>(null)
   const addToolOutputRef = useRef<typeof addToolOutput>(null as any)
   const spokenToolCallsRef = useRef<Set<string>>(new Set())
+  const voiceModeWhenSentRef = useRef(false)
   const listRef = useRef<FlashListRef<UIMessage>>(null)
   const inputRef = useRef<AnimatedInputRef>(null)
   const insets = useSafeAreaInsets()
   const headerHeight = insets.top + 44
-  const colorScheme = useColorScheme()
-  const isDark = colorScheme === 'dark'
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions()
   // Keyboard animation for content padding
   const { height: keyboardHeight } = useReanimatedKeyboardAnimation()
 
@@ -188,8 +188,10 @@ export default function ChatScreen() {
       }, 1500)
 
       // Voice mode: speak the assistant's text response
-      // Skip if an ask_user handler already spoke this message's text
-      if (voiceModeRef.current && message.parts) {
+      // Use voiceModeWhenSentRef so speech still fires even if voice UI
+      // was soft-exited (e.g. food confirmation card appeared)
+      if (voiceModeWhenSentRef.current && message.parts) {
+        voiceModeWhenSentRef.current = false
         const hasAskUser = message.parts.some(
           (p: any) => p.type === 'tool-ask_user' && spokenToolCallsRef.current.has(p.toolCallId)
         )
@@ -222,6 +224,7 @@ export default function ChatScreen() {
         const clarification = pendingClarificationRef.current
         if (clarification) {
           setIsThinking(true)
+          voiceModeWhenSentRef.current = true
           addToolOutputRef.current?.({
             tool: 'ask_user',
             toolCallId: clarification.toolCallId,
@@ -230,6 +233,7 @@ export default function ChatScreen() {
           setPendingClarification(null)
         } else {
           setIsThinking(true)
+          voiceModeWhenSentRef.current = true
           setToolActivity({ toolName: null, toolState: null, foodQuery: null })
           sendMessage({ text })
         }
@@ -276,11 +280,41 @@ export default function ChatScreen() {
 
   const exitVoiceMode = useCallback(() => {
     setVoiceMode(false)
+    setIsMuted(false)
     voiceModeRef.current = false
     voiceChat.setVoiceModeActive(false)
     voiceChat.stopListening()
     voiceChat.stopSpeaking()
   }, [voiceChat])
+
+  // Soft exit: close UI and stop listening, but let TTS finish
+  const softExitVoiceMode = useCallback(() => {
+    setVoiceMode(false)
+    setIsMuted(false)
+    voiceModeRef.current = false
+    voiceChat.setVoiceModeActive(false)
+    voiceChat.stopListening()
+  }, [voiceChat])
+
+  const toggleMute = useCallback(() => {
+    setIsMuted(prev => {
+      if (!prev) {
+        voiceChat.stopListening()
+      } else {
+        voiceChat.startListening()
+      }
+      return !prev
+    })
+  }, [voiceChat])
+
+  // Fade out chat content when voice mode is active
+  const chatOpacity = useSharedValue(1)
+  useEffect(() => {
+    chatOpacity.value = withTiming(voiceMode ? 0 : 1, { duration: 250 })
+  }, [voiceMode, chatOpacity])
+  const chatFadeStyle = useAnimatedStyle(() => ({
+    opacity: chatOpacity.value,
+  }))
 
   const handleVoiceInterrupt = useCallback(() => {
     voiceChat.stopSpeaking()
@@ -623,6 +657,13 @@ export default function ChatScreen() {
     }
   }, [callbackRegistry, handleQuantityChange, handleRemoveEntry])
 
+  // Auto-exit voice mode when food confirmation card appears (soft exit — let TTS finish)
+  useEffect(() => {
+    if (showCard && voiceMode) {
+      softExitVoiceMode()
+    }
+  }, [showCard, voiceMode, softExitVoiceMode])
+
   // Generate meal title when entries change (2+ items)
   useEffect(() => {
     if (pendingEntries.length >= 2) {
@@ -681,78 +722,92 @@ export default function ChatScreen() {
 
   return (
     <View className="flex-1">
-      {/* Messages list - fills entire screen, content scrolls under input */}
-      <Pressable className="absolute inset-0" onPress={Keyboard.dismiss}>
-        {messages.length === 0 && (
-          <Animated.View
-            entering={SlideInUp.springify().delay(100)}
-            style={{ paddingTop: headerHeight + 8 }}
-          >
-            <EmptyStateCarousels onSelectItem={handleCarouselSelect} />
-          </Animated.View>
-        )}
-        <FlashList
-          ref={listRef}
-          data={messages}
-          showsVerticalScrollIndicator={false}
-          keyboardDismissMode="interactive"
-          keyboardShouldPersistTaps="handled"
-          renderItem={renderItem}
-          contentContainerStyle={{
-            paddingTop: headerHeight + 8,
-          }}
-          onContentSizeChange={() => {
-            // Scroll to bottom when content size changes (streaming)
-            if (messages.length > 0) {
-              scrollToBottom(false)
-            }
-          }}
-          ListFooterComponent={ListFooter}
+      {/* Orb — behind chat when normal, above when voice mode */}
+      <View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: voiceMode ? 50 : 0,
+        }}
+      >
+        <AudioGradientOrb
+          voiceMode={voiceMode}
+          voiceState={voiceChat.state}
+          analyserNode={voiceChat.analyserNode}
+          width={screenWidth}
+          height={screenHeight}
         />
-      </Pressable>
+      </View>
 
-      {/* Floating input - positioned over content with keyboard animation */}
-      <AnimatedInput
-        ref={inputRef}
-        value={input}
-        onChangeText={setInput}
-        onSend={handleSend}
-        hasMessages={messages.length > 0}
-        keyboardHeight={keyboardHeight}
-        disabled={!!pendingClarification}
-        topContent={pendingClarification ? (
-          <View onLayout={(e) => setCardHeight(e.nativeEvent.layout.height)}>
-            <ClarificationCard
-              question={pendingClarification.question}
-              options={pendingClarification.options}
-              allowFreeform={pendingClarification.allowFreeform}
-              context={pendingClarification.context}
-              onSubmit={handleClarificationAnswer}
-              onDismiss={handleClarificationDismiss}
-            />
-          </View>
-        ) : pendingEntries.length > 0 ? (
-          <View onLayout={(e) => setCardHeight(e.nativeEvent.layout.height)}>
-            <FoodConfirmationCard
-              entries={pendingEntries.map(p => p.entry)}
-              mealTitle={mealTitle}
-              isTitleLoading={isTitleLoading}
-              onConfirm={handleConfirmLog}
-              onRemove={handleRemoveEntry}
-              onQuantityChange={handleQuantityChange}
-            />
-          </View>
-        ) : undefined}
-        topContentVisible={(!!pendingClarification && !clarificationDismissing) || cardVisible}
-        onVoicePress={enterVoiceMode}
-      />
-      <LinearGradient
-        colors={[
-          isDark ? colors.dark.background + '00' : colors.light.background + '00',
-          isDark ? colors.dark.background : colors.light.background
-        ]}
-        style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 100, zIndex: 0 }}
-      />
+      {/* Chat content — fades out when voice mode activates */}
+      <Animated.View style={[{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1 }, chatFadeStyle]} pointerEvents={voiceMode ? 'none' : 'auto'}>
+        <Pressable style={{ flex: 1 }} onPress={Keyboard.dismiss}>
+          {messages.length === 0 && (
+            <Animated.View
+              entering={SlideInUp.springify().delay(100)}
+              style={{ paddingTop: headerHeight + 8 }}
+            >
+              <EmptyStateCarousels onSelectItem={handleCarouselSelect} />
+            </Animated.View>
+          )}
+          <FlashList
+            ref={listRef}
+            data={messages}
+            showsVerticalScrollIndicator={false}
+            keyboardDismissMode="interactive"
+            keyboardShouldPersistTaps="handled"
+            renderItem={renderItem}
+            contentContainerStyle={{
+              paddingTop: headerHeight + 8,
+            }}
+            onContentSizeChange={() => {
+              if (messages.length > 0) {
+                scrollToBottom(false)
+              }
+            }}
+            ListFooterComponent={ListFooter}
+          />
+        </Pressable>
+
+        <AnimatedInput
+          ref={inputRef}
+          value={input}
+          onChangeText={setInput}
+          onSend={handleSend}
+          hasMessages={messages.length > 0}
+          keyboardHeight={keyboardHeight}
+          disabled={!!pendingClarification}
+          topContent={pendingClarification ? (
+            <View onLayout={(e) => setCardHeight(e.nativeEvent.layout.height)}>
+              <ClarificationCard
+                question={pendingClarification.question}
+                options={pendingClarification.options}
+                allowFreeform={pendingClarification.allowFreeform}
+                context={pendingClarification.context}
+                onSubmit={handleClarificationAnswer}
+                onDismiss={handleClarificationDismiss}
+              />
+            </View>
+          ) : pendingEntries.length > 0 ? (
+            <View onLayout={(e) => setCardHeight(e.nativeEvent.layout.height)}>
+              <FoodConfirmationCard
+                entries={pendingEntries.map(p => p.entry)}
+                mealTitle={mealTitle}
+                isTitleLoading={isTitleLoading}
+                onConfirm={handleConfirmLog}
+                onRemove={handleRemoveEntry}
+                onQuantityChange={handleQuantityChange}
+              />
+            </View>
+          ) : undefined}
+          topContentVisible={(!!pendingClarification && !clarificationDismissing) || cardVisible}
+          onVoicePress={enterVoiceMode}
+        />
+      </Animated.View>
 
       {/* Voice mode overlay */}
       {voiceMode && (
@@ -765,8 +820,10 @@ export default function ChatScreen() {
           toolState={toolActivity.toolState}
           foodQuery={toolActivity.foodQuery || undefined}
           isThinking={isThinking}
+          isMuted={isMuted}
           onClose={exitVoiceMode}
           onTapInterrupt={handleVoiceInterrupt}
+          onToggleMute={toggleMute}
         />
       )}
     </View>

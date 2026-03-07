@@ -23,7 +23,7 @@ export async function POST(req: Request) {
 
   try {
     const res = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
+      `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}?output_format=mp3_44100_128`,
       {
         method: 'POST',
         headers: {
@@ -32,8 +32,7 @@ export async function POST(req: Request) {
         },
         body: JSON.stringify({
           text,
-          model_id: 'eleven_v3',
-          output_format: 'mp3_44100_128',
+          model_id: 'eleven_flash_v2_5',
           voice_settings: {
             stability: 0.5,
             similarity_boost: 0.75,

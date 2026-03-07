@@ -10,7 +10,6 @@ import { StyleSheet, useColorScheme, useWindowDimensions, View } from 'react-nat
 import { Haptics } from 'react-native-nitro-haptics'
 import PagerView from 'react-native-pager-view'
 import Animated, { Extrapolation, interpolate, runOnJS, SharedValue, useAnimatedStyle, useDerivedValue, useEvent, useHandler, useSharedValue } from 'react-native-reanimated'
-import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 // Page indicator constants
@@ -193,33 +192,7 @@ function AnimatedMeshBackground({ scrollPosition }: { scrollPosition: SharedValu
   )
 }
 
-function AnimatedChatGradient({ scrollPosition }: { scrollPosition: SharedValue<number> }) {
-  const { width: screenWidth } = useWindowDimensions()
-  const colorScheme = useColorScheme()
-  const isDark = colorScheme === 'dark'
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    // scrollPosition 1 = Chat (fully visible), fade out when swiping away
-    opacity: interpolate(Math.abs(scrollPosition.value - 1), [0, 1], [1, 0], 'clamp'),
-  }))
-
-  return (
-    <Animated.View
-      style={[{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 100 }, animatedStyle]}
-      pointerEvents="none"
-    >
-      <Svg style={{ width: screenWidth, height: 100 }}>
-        <Defs>
-          <RadialGradient id="chatGrad" cx="50%" cy="100%" r="100%">
-            <Stop offset="0%" stopColor={isDark ? colors.dark.primary : colors.light.primary} stopOpacity="0.3" />
-            <Stop offset="100%" stopColor={isDark ? colors.dark.background : colors.light.background} stopOpacity="0" />
-          </RadialGradient>
-        </Defs>
-        <Rect x="0" y="0" width="100%" height="100%" fill="url(#chatGrad)" />
-      </Svg>
-    </Animated.View>
-  )
-}
 
 function PagerContent({ scrollPosition, pagerRef }: { scrollPosition: SharedValue<number>, pagerRef: React.RefObject<PagerView | null> }) {
   const lastHapticPosition = useSharedValue<number | null>(null)
@@ -313,7 +286,6 @@ export default function PagerScreen() {
         </View>
 
         <PagerContent scrollPosition={scrollPosition} pagerRef={pagerRef} />
-        <AnimatedChatGradient scrollPosition={scrollPosition} />
       </View>
     </PagerNavigationContext.Provider>
   )

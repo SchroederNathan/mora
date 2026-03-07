@@ -133,6 +133,7 @@ export async function POST(req: Request) {
   console.log('[CHAT API] userGoals:', userGoals);
   console.log('[CHAT API] todayDateKey:', todayDateKey);
 
+  try {
   const result = streamText({
     model: gateway("google/gemini-3-flash"),
     messages: await convertToModelMessages(messages),
@@ -587,4 +588,11 @@ VOICE MODE — The user is speaking to you hands-free and CANNOT see the screen.
       'Content-Encoding': 'none',
     },
   });
+  } catch (error) {
+    console.error('[CHAT API] Stream error:', error);
+    return new Response(
+      JSON.stringify({ error: 'Failed to generate response. Please try again.' }),
+      { status: 502, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
 }

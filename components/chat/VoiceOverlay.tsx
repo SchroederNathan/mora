@@ -1,22 +1,15 @@
-import { AudioWaveform } from './AudioWaveform'
 import { ShimmerText } from './ShimmerText'
 import { Text } from '@/components/ui/Text'
 import { colors } from '@/constants/colors'
 import type { VoiceState } from '@/hooks/useVoiceChat'
-import { Mic, X } from 'lucide-react-native'
-import { Pressable, useColorScheme, useWindowDimensions, View } from 'react-native'
+import { Mic, MicOff, X } from 'lucide-react-native'
+import { Pressable, useColorScheme, View } from 'react-native'
 import { Haptics } from 'react-native-nitro-haptics'
 import Animated, {
   FadeIn,
   FadeOut,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-  Easing,
 } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useEffect } from 'react'
 
 function getProcessingText(
   isThinking: boolean,
@@ -42,77 +35,35 @@ type VoiceOverlayProps = {
   toolState: string | null
   foodQuery?: string
   isThinking: boolean
+  isMuted: boolean
   onClose: () => void
   onTapInterrupt: () => void
-}
-
-function PulsingMic({ color }: { color: string }) {
-  const scale = useSharedValue(1)
-
-  useEffect(() => {
-    scale.value = withRepeat(
-      withTiming(1.3, { duration: 800, easing: Easing.inOut(Easing.ease) }),
-      -1,
-      true
-    )
-  }, [scale])
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-    opacity: 0.3,
-  }))
-
-  return (
-    <View style={{ alignItems: 'center', justifyContent: 'center' }}>
-      <Animated.View
-        style={[
-          {
-            position: 'absolute',
-            width: 80,
-            height: 80,
-            borderRadius: 40,
-            backgroundColor: color,
-          },
-          animatedStyle,
-        ]}
-      />
-      <View
-        style={{
-          width: 72,
-          height: 72,
-          borderRadius: 36,
-          backgroundColor: color,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Mic size={32} color="white" strokeWidth={2} />
-      </View>
-    </View>
-  )
+  onToggleMute: () => void
 }
 
 export function VoiceOverlay({
   state,
   interimTranscript,
   lastAssistantText,
-  analyserNode,
   toolName,
   toolState,
   foodQuery,
   isThinking,
+  isMuted,
   onClose,
   onTapInterrupt,
+  onToggleMute,
 }: VoiceOverlayProps) {
   const insets = useSafeAreaInsets()
   const colorScheme = useColorScheme()
   const isDark = colorScheme === 'dark'
-  const { width: screenWidth } = useWindowDimensions()
 
   const primaryColor = isDark ? colors.dark.primary : colors.light.primary
-  const bgColor = isDark ? 'rgba(10,10,10,0.95)' : 'rgba(250,250,250,0.95)'
   const textColor = isDark ? colors.dark.foreground : colors.light.foreground
   const mutedColor = isDark ? '#a3a3a3' : '#71717a'
+  const buttonBg = isDark ? 'rgba(39,39,42,0.8)' : 'rgba(228,228,231,0.8)'
+
+  const MicIcon = isMuted ? MicOff : Mic
 
   return (
     <Animated.View
@@ -124,9 +75,9 @@ export function VoiceOverlay({
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: bgColor,
-        zIndex: 50,
+        zIndex: 51,
       }}
+      pointerEvents="box-none"
     >
       <Pressable
         style={{ flex: 1 }}
@@ -137,66 +88,44 @@ export function VoiceOverlay({
           }
         }}
       >
-        {/* Close button */}
-        <Pressable
-          onPress={() => {
-            Haptics.selection()
-            onClose()
-          }}
-          style={{
-            position: 'absolute',
-            top: insets.top + 12,
-            right: 20,
-            zIndex: 10,
-            width: 40,
-            height: 40,
-            borderRadius: 20,
-            backgroundColor: isDark ? '#27272a' : '#e4e4e7',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <X size={20} color={textColor} strokeWidth={2.5} />
-        </Pressable>
+        {/* Spacer to push content down */}
+        <View style={{ flex: 1 }} />
 
-        {/* Center content */}
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
+        {/* Text area — lower center, above buttons */}
+        <View style={{ paddingHorizontal: 32, alignItems: 'center', minHeight: 80 }}>
           {(state === 'listening' || state === 'idle') && (
             <Animated.View entering={FadeIn.duration(300)} style={{ alignItems: 'center' }}>
-              <PulsingMic color={primaryColor} />
-              <View style={{ marginTop: 32, minHeight: 48 }}>
-                {interimTranscript ? (
-                  <Text
-                    style={{
-                      fontSize: 20,
-                      color: textColor,
-                      textAlign: 'center',
-                      fontFamily: 'Sentient Variable',
-                    }}
-                  >
-                    {interimTranscript}
-                  </Text>
-                ) : (
-                  <Text
-                    style={{
-                      fontSize: 17,
-                      color: mutedColor,
-                      textAlign: 'center',
-                      fontFamily: 'Sentient Variable',
-                    }}
-                  >
-                    Listening...
-                  </Text>
-                )}
-              </View>
+              {interimTranscript ? (
+                <Text
+                  style={{
+                    fontSize: 20,
+                    color: textColor,
+                    textAlign: 'center',
+                    fontFamily: 'Sentient Variable',
+                  }}
+                >
+                  {interimTranscript}
+                </Text>
+              ) : (
+                <Text
+                  style={{
+                    fontSize: 17,
+                    color: mutedColor,
+                    textAlign: 'center',
+                    fontFamily: 'Sentient Variable',
+                  }}
+                >
+                  Listening...
+                </Text>
+              )}
             </Animated.View>
           )}
 
           {state === 'processing' && (
             <Animated.View entering={FadeIn.duration(300)} style={{ alignItems: 'center' }}>
               <ShimmerText
-                className="text-xl"
-                highlightColor={primaryColor}
+                className="text-base font-medium text-muted"
+                highlightColor={isDark ? '#fafafa' : '#71717a'}
               >
                 {getProcessingText(isThinking, toolName, toolState, foodQuery)}
               </ShimmerText>
@@ -205,17 +134,9 @@ export function VoiceOverlay({
 
           {state === 'speaking' && (
             <Animated.View entering={FadeIn.duration(300)} style={{ alignItems: 'center' }}>
-              <AudioWaveform
-                analyserNode={analyserNode}
-                isActive={state === 'speaking'}
-                color={primaryColor}
-                width={screenWidth - 64}
-                height={80}
-              />
               {lastAssistantText ? (
                 <Text
                   style={{
-                    marginTop: 24,
                     fontSize: 17,
                     color: textColor,
                     textAlign: 'center',
@@ -229,7 +150,7 @@ export function VoiceOverlay({
               ) : null}
               <Text
                 style={{
-                  marginTop: 16,
+                  marginTop: 12,
                   fontSize: 13,
                   color: mutedColor,
                   textAlign: 'center',
@@ -241,18 +162,50 @@ export function VoiceOverlay({
           )}
         </View>
 
-        {/* State label at bottom */}
-        <View style={{ paddingBottom: insets.bottom + 24, alignItems: 'center' }}>
-          <Text
+        {/* Bottom buttons — mic mute + close */}
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 24,
+            paddingBottom: insets.bottom + 24,
+            paddingTop: 24,
+          }}
+        >
+          <Pressable
+            onPress={() => {
+              Haptics.selection()
+              onToggleMute()
+            }}
             style={{
-              fontSize: 13,
-              color: mutedColor,
-              textTransform: 'uppercase',
-              letterSpacing: 1,
+              width: 52,
+              height: 52,
+              borderRadius: 26,
+              backgroundColor: buttonBg,
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
-            {(state === 'listening' || state === 'idle') ? 'Voice Mode' : state === 'processing' ? 'Processing' : 'Speaking'}
-          </Text>
+            <MicIcon size={22} color={isMuted ? mutedColor : textColor} strokeWidth={2.5} />
+          </Pressable>
+
+          <Pressable
+            onPress={() => {
+              Haptics.selection()
+              onClose()
+            }}
+            style={{
+              width: 52,
+              height: 52,
+              borderRadius: 26,
+              backgroundColor: buttonBg,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <X size={22} color={textColor} strokeWidth={2.5} />
+          </Pressable>
         </View>
       </Pressable>
     </Animated.View>
