@@ -1,7 +1,16 @@
 import { colors } from '@/constants/colors'
 import { useColorScheme, View } from 'react-native'
 import { Text } from '@/components/ui/Text'
+import { StaggeredText } from '@/components/ui/StaggeredText'
 import Svg, { Circle } from 'react-native-svg'
+import Animated, {
+  useAnimatedProps,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated'
+import { useEffect } from 'react'
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle)
 
 type CalorieTrackerProps = {
   eaten: number
@@ -24,13 +33,33 @@ export default function CalorieTracker({ eaten, target }: CalorieTrackerProps) {
   const arcPercentage = 0.75
   const arcLength = circumference * arcPercentage
   const gapLength = circumference - arcLength
-  const progressArcLength = arcLength * progress
+
+  // Animated progress arc
+  const animatedProgress = useSharedValue(progress)
+
+  useEffect(() => {
+    animatedProgress.set(
+      withSpring(progress, { damping: 20, stiffness: 120 })
+    )
+  }, [progress])
+
+  const animatedProps = useAnimatedProps(() => {
+    const progressArcLength = arcLength * animatedProgress.get()
+    return {
+      strokeDasharray: [progressArcLength, circumference] as unknown as string,
+    }
+  })
 
   return (
     <View className="flex-row items-center justify-between px-6 py-6">
       {/* Remaining */}
       <View className="items-center flex-1">
-        <Text className="text-foreground text-2xl font-semibold">{remaining}</Text>
+        <StaggeredText
+          phrases={[String(remaining)]}
+          visible={true}
+          mode="oneshot"
+          className="text-foreground text-2xl font-semibold"
+        />
         <Text className="text-muted text-xs uppercase tracking-wider mt-1">Remaining</Text>
       </View>
 
@@ -51,19 +80,24 @@ export default function CalorieTracker({ eaten, target }: CalorieTrackerProps) {
               strokeLinecap="round"
             />
             {/* Progress arc */}
-            <Circle
+            <AnimatedCircle
               cx={size / 2}
               cy={size / 2}
               r={radius}
               stroke={theme.foreground}
               strokeWidth={strokeWidth}
               fill="transparent"
-              strokeDasharray={`${progressArcLength} ${circumference}`}
+              animatedProps={animatedProps}
               strokeLinecap="round"
             />
           </Svg>
           <View className="absolute inset-0 items-center justify-center">
-            <Text className="text-foreground text-4xl font-bold">{eaten}</Text>
+            <StaggeredText
+              phrases={[String(eaten)]}
+              visible={true}
+              mode="oneshot"
+              className="text-foreground text-4xl font-bold"
+            />
             <Text className="text-muted text-xs uppercase tracking-wider text-sans">Eaten</Text>
           </View>
         </View>
@@ -71,7 +105,12 @@ export default function CalorieTracker({ eaten, target }: CalorieTrackerProps) {
 
       {/* Target */}
       <View className="items-center flex-1">
-        <Text className="text-foreground text-2xl font-semibold">{target}</Text>
+        <StaggeredText
+          phrases={[String(target)]}
+          visible={true}
+          mode="oneshot"
+          className="text-foreground text-2xl font-semibold"
+        />
         <Text className="text-muted text-xs uppercase tracking-wider mt-1">Target</Text>
       </View>
     </View>

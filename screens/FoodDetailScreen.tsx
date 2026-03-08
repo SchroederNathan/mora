@@ -3,8 +3,8 @@ import { SegmentedMacroBar } from '@/components/SegmentedMacroBar'
 import { Text } from '@/components/ui/Text'
 import { useFoodDetailCallbacks } from '@/contexts/FoodDetailCallbackContext'
 import { useDailyLogStore } from '@/stores'
-import type { FoodConfirmationEntry } from '@/types/nutrition'
-import { scaleMacros } from '@/types/nutrition'
+import type { FoodConfirmationEntry, FoodLogEntry } from '@/types/nutrition'
+import { scaleMacros, sumMacros } from '@/types/nutrition'
 import { GlassView } from 'expo-glass-effect'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Beef, Droplet, Minus, Plus, Trash2, Wheat } from 'lucide-react-native'
@@ -117,18 +117,63 @@ function PendingEntryRow({
   )
 }
 
+function MealEntryRow({ entry }: { entry: FoodLogEntry }) {
+  const scaled = useMemo(
+    () => scaleMacros(entry.snapshot.nutrients, entry.quantity),
+    [entry.snapshot.nutrients, entry.quantity]
+  )
+
+  return (
+    <GlassView
+      isInteractive
+      className="rounded-2xl p-3.5"
+      style={{ borderCurve: 'continuous' }}
+    >
+      <View className="flex-row items-center justify-between mb-2">
+        <Text className="text-foreground text-base font-medium flex-1 mr-2" numberOfLines={1}>
+          {entry.snapshot.name}
+        </Text>
+        <Text className="text-muted text-xs">
+          {entry.snapshot.serving.amount * entry.quantity} {entry.snapshot.serving.unit}
+        </Text>
+      </View>
+
+      <View className="flex-row items-end gap-1 mb-3">
+        <Text className="text-foreground text-xl font-bold">{scaled.calories}</Text>
+        <Text className="text-muted text-sm mb-0.5">kcal</Text>
+      </View>
+
+      <View className="flex-row items-center gap-3">
+        <View className="flex-row items-center gap-1">
+          <Beef size={12} color="#22C55E" />
+          <Text className="text-muted text-xs">{scaled.protein}g</Text>
+        </View>
+        <View className="flex-row items-center gap-1">
+          <Wheat size={12} color="#FBBF24" />
+          <Text className="text-muted text-xs">{scaled.carbs}g</Text>
+        </View>
+        <View className="flex-row items-center gap-1">
+          <Droplet size={12} color="#3B82F6" />
+          <Text className="text-muted text-xs">{scaled.fat}g</Text>
+        </View>
+      </View>
+    </GlassView>
+  )
+}
+
 export default function FoodDetailScreen() {
   const router = useRouter()
-  const params = useLocalSearchParams<{ mode: string; entryId?: string; entries?: string }>()
+  const params = useLocalSearchParams<{ mode: string; entryId?: string; entries?: string; mealGroupId?: string }>()
   const colorScheme = useColorScheme()
   const isDark = colorScheme === 'dark'
   const insets = useSafeAreaInsets()
   const callbacks = useFoodDetailCallbacks()
 
-  const mode = params.mode as 'logged' | 'pending'
+  const mode = params.mode as 'logged' | 'pending' | 'meal'
 
   const updateEntry = useDailyLogStore(s => s.updateEntry)
   const removeEntry = useDailyLogStore(s => s.removeEntry)
+  const removeMeal = useDailyLogStore(s => s.removeMeal)
 
   const pendingEntries: FoodConfirmationEntry[] = useMemo(() => {
     if (mode !== 'pending' || !params.entries) return []
@@ -144,6 +189,19 @@ export default function FoodDetailScreen() {
       ? s.log.entries.find(e => e.id === params.entryId)
       : undefined
   )
+
+  const mealEntries = useDailyLogStore(s =>
+    mode === 'meal' && params.mealGroupId
+      ? s.log.entries.filter(e => e.mealGroupId === params.mealGroupId)
+      : []
+  )
+
+  const mealTitle = mealEntries.length > 0 ? mealEntries[0].mealTitle : undefined
+
+  const mealTotals = useMemo(() => {
+    if (mode !== 'meal' || mealEntries.length === 0) return null
+    return sumMacros(mealEntries)
+  }, [mode, mealEntries])
 
   const [loggedQuantity, setLoggedQuantity] = useState(storeEntry?.quantity ?? 1)
 
@@ -171,6 +229,13 @@ export default function FoodDetailScreen() {
     removeEntry(storeEntry.id)
     router.back()
   }, [storeEntry, removeEntry, router])
+
+  const handleMealDelete = useCallback(() => {
+    if (!params.mealGroupId) return
+    Haptics.notification('warning')
+    removeMeal(params.mealGroupId)
+    router.back()
+  }, [params.mealGroupId, removeMeal, router])
 
   const handleLoggedIncrement = useCallback(() => {
     if (!storeEntry) return
@@ -204,7 +269,10 @@ export default function FoodDetailScreen() {
     if (mode === 'logged' && params.entryId && !storeEntry) {
       router.back()
     }
-  }, [storeEntry, mode, params.entryId, router])
+    if (mode === 'meal' && params.mealGroupId && mealEntries.length === 0) {
+      router.back()
+    }
+  }, [storeEntry, mode, params.entryId, params.mealGroupId, mealEntries.length, router])
 
   return (
     <View className="px-5 pt-8" style={{ paddingBottom: insets.bottom + 24 }}>
@@ -302,6 +370,55 @@ export default function FoodDetailScreen() {
             </Pressable>
           </View>
         </View>
+      )}
+
+      {/* MEAL MODE */}
+      {mode === 'meal' && mealTotals && mealEntries.length > 0 && (
+        <>
+          <View className="mb-4">
+            <Text className="text-foreground text-2xl font-semibold mb-1 font-serif">
+              {mealTitle ?? 'Meal'}
+            </Text>
+            <Text className="text-muted text-sm mb-6 font-serif">
+              {mealEntries.length} {mealEntries.length === 1 ? 'item' : 'items'}
+              {mealEntries[0].meal ? ` · ${mealEntries[0].meal.charAt(0).toUpperCase() + mealEntries[0].meal.slice(1)}` : ''}
+            </Text>
+
+            <View className="flex-row items-end gap-2 mb-6">
+              <Text className="text-foreground text-5xl font-bold font-serif">{mealTotals.calories}</Text>
+              <Text className="text-muted text-xl mb-2 font-serif">kcal</Text>
+            </View>
+
+            <View className="mb-4">
+              <SegmentedMacroBar protein={mealTotals.protein} carbs={mealTotals.carbs} fat={mealTotals.fat} />
+            </View>
+
+            <View className="flex-row justify-between">
+              <MacroDetail label="Protein" value={mealTotals.protein} color="#22C55E" />
+              <MacroDetail label="Carbs" value={mealTotals.carbs} color="#FBBF24" />
+              <MacroDetail label="Fats" value={mealTotals.fat} color="#3B82F6" />
+            </View>
+          </View>
+
+          <Text className="text-muted text-xs uppercase tracking-wider font-bold mb-3 ml-1">
+            Items
+          </Text>
+          <View className="gap-2.5">
+            {mealEntries.map((entry) => (
+              <MealEntryRow key={entry.id} entry={entry} />
+            ))}
+          </View>
+
+          <View className="items-center mt-6">
+            <Pressable
+              onPress={handleMealDelete}
+              className="flex-row items-center gap-2 px-5 py-3 rounded-full bg-red-500/15"
+            >
+              <Trash2 size={16} color="#EF4444" />
+              <Text className="text-red-500 text-sm font-medium">Delete Meal</Text>
+            </Pressable>
+          </View>
+        </>
       )}
 
       {/* PENDING MODE */}

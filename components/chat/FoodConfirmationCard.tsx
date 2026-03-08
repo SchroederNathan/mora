@@ -9,9 +9,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { Pressable, useColorScheme, View } from 'react-native'
 import { Haptics } from 'react-native-nitro-haptics'
 import Animated, {
-  FadeIn,
   FadeInUp,
-  FadeOut,
   FadeOutDown,
   interpolate,
   LinearTransition,
@@ -20,12 +18,12 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated'
 import { ShimmerText } from './ShimmerText'
-
-const entryLayoutTransition = LinearTransition.springify()
+import type { FoodConfirmationEntry } from '@/types/nutrition'
 
 // Re-export from canonical location
 export type { FoodConfirmationEntry } from '@/types/nutrition'
-import type { FoodConfirmationEntry } from '@/types/nutrition'
+
+const entryLayoutTransition = LinearTransition.springify()
 
 type FoodConfirmationCardProps = {
   entries: FoodConfirmationEntry[]
@@ -50,10 +48,9 @@ function formatMealName(meal: string): string {
 
 function formatServing(quantity: number, serving: { amount: number; unit: string }): string {
   const total = quantity * serving.amount
-  if (total === 1 && serving.unit.toLowerCase() === 'serving') {
-    return '1 serving'
-  }
-  return `${total} ${serving.unit}`
+  if (total === 1 && serving.unit.toLowerCase() === 'serving') return '1 serving'
+  if (total === 1) return `${total} ${serving.unit}`
+  return `${total} × ${serving.unit}`
 }
 
 // Edit mode entry row
@@ -100,7 +97,7 @@ const EditEntryRow = memo(function EditEntryRow({
           {entry.name}
         </Text>
         <Text className="text-muted text-base">
-          {formatServing(1, entry.serving)}
+          {formatServing(entry.quantity, entry.serving)}
         </Text>
       </View>
 
@@ -150,6 +147,13 @@ export function FoodConfirmationCard({
   const theme = isDark ? colors.dark : colors.light
   const [isExpanded, setIsExpanded] = useState(false)
   const chevronRotation = useSharedValue(0)
+  const expandProgress = useSharedValue(0)
+
+  const expandStyle = useAnimatedStyle(() => ({
+    maxHeight: interpolate(expandProgress.value, [0, 1], [0, 500]),
+    opacity: interpolate(expandProgress.value, [0, 0.3, 1], [0, 0, 1]),
+    overflow: 'hidden' as const,
+  }))
 
   const isEmpty = entries.length === 0
   const meal = entries[0]?.meal || getDefaultMeal()
@@ -164,9 +168,10 @@ export function FoodConfirmationCard({
     setIsExpanded((prev) => {
       const next = !prev
       chevronRotation.value = withSpring(next ? 1 : 0)
+      expandProgress.value = withSpring(next ? 1 : 0)
       return next
     })
-  }, [isEmpty, chevronRotation])
+  }, [isEmpty, chevronRotation, expandProgress])
 
   // Calculate totals
   const { totalCalories, totalProtein, totalCarbs, totalFat } = useMemo(() => {
@@ -217,8 +222,9 @@ export function FoodConfirmationCard({
     if (entries.length === 0) {
       setIsExpanded(false)
       chevronRotation.value = withSpring(0)
+      expandProgress.value = withSpring(0)
     }
-  }, [entries.length, chevronRotation])
+  }, [entries.length, chevronRotation, expandProgress])
 
   return (
     <View className="mx-1 -mb-2">
@@ -228,7 +234,7 @@ export function FoodConfirmationCard({
       >
         {/* Header: Title + Expand chevron */}
         <Pressable onPress={handleToggleExpand}>
-        <Animated.View layout={entryLayoutTransition} className="flex-row justify-between items-center mb-8">
+        <View className="flex-row justify-between items-center mb-8">
           {isEmpty ? (
             <Text className="text-muted text-lg">Add food to continue...</Text>
           ) : (
@@ -253,69 +259,69 @@ export function FoodConfirmationCard({
               <ChevronDown size={20} color={theme.primary} />
             </Animated.View>
           )}
-        </Animated.View>
+        </View>
         </Pressable>
 
         {/* Large Calories */}
         {!isEmpty && (
-          <Animated.View layout={entryLayoutTransition} className="mb-8 flex-row items-end gap-2">
+          <View className="mb-8 flex-row items-end gap-2">
             <AnimatedValue
               value={totalCalories}
               className="text-foreground text-5xl font-bold"
             />
             <Text className="text-muted text-xl mb-2">kcal</Text>
-          </Animated.View>
+          </View>
         )}
 
         {/* Segmented Macro Bar */}
         {!isEmpty && (
-          <Animated.View layout={entryLayoutTransition} className="mb-4">
+          <View className="mb-4">
             <SegmentedMacroBar
               protein={totalProtein}
               carbs={totalCarbs}
               fat={totalFat}
               animated
             />
-          </Animated.View>
+          </View>
         )}
 
         {/* Macro Detail Row */}
         {!isEmpty && (
-          <Animated.View layout={entryLayoutTransition} className="flex-row justify-between mb-8">
+          <View className="flex-row justify-between mb-8">
             <MacroDetail label="Protein" value={totalProtein} color={MACRO_COLORS.protein} animated />
             <MacroDetail label="Carbs" value={totalCarbs} color={MACRO_COLORS.carbs} animated />
             <MacroDetail label="Fats" value={totalFat} color={MACRO_COLORS.fat} animated />
-          </Animated.View>
+          </View>
         )}
 
         {/* Expandable Entry List */}
-        {isExpanded && !isEmpty && (
+        {!isEmpty && (
           <Animated.View
-            entering={FadeIn.duration(200)}
-            exiting={FadeOut.duration(150)}
-            layout={entryLayoutTransition}
-            className="mb-8"
-            style={{
-              borderTopWidth: 1,
-              borderTopColor: theme.border,
-              paddingTop: 8,
-            }}
+            style={[
+              expandStyle,
+              {
+                borderTopWidth: 1,
+                borderTopColor: theme.border,
+              },
+            ]}
           >
-            {entries.map((entry, index) => (
-              <EditEntryRow
-                key={`${entry.name}-${entry.fdcId ?? index}`}
-                entry={entry}
-                index={index}
-                themeColor={theme.muted}
-                onRemove={handleRemove}
-                onQuantityChange={handleQuantityChange}
-              />
-            ))}
+            <View style={{ paddingTop: 8, paddingBottom: 32 }}>
+              {entries.map((entry, index) => (
+                <EditEntryRow
+                  key={`${entry.name}-${entry.fdcId ?? index}`}
+                  entry={entry}
+                  index={index}
+                  themeColor={theme.muted}
+                  onRemove={handleRemove}
+                  onQuantityChange={handleQuantityChange}
+                />
+              ))}
+            </View>
           </Animated.View>
         )}
 
         {/* Log Button */}
-        <Animated.View layout={entryLayoutTransition}>
+        <View>
           <Pressable
             onPress={handleConfirm}
             disabled={isEmpty}
@@ -332,7 +338,7 @@ export function FoodConfirmationCard({
               Log
             </Text>
           </Pressable>
-        </Animated.View>
+        </View>
       </GradientBorderCard>
     </View>
   )

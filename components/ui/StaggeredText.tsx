@@ -58,6 +58,8 @@ const AnimatedChar: FC<AnimatedCharProps> = ({ index, char, progress, totalCount
 type StaggeredTextProps = {
   phrases: string[]
   visible: boolean
+  /** 'cycle' rotates through phrases on interval; 'oneshot' animates in once and re-animates when phrases[0] changes */
+  mode?: 'cycle' | 'oneshot'
   intervalMs?: number
   className?: string
   /** Delay in ms before the initial animation starts */
@@ -67,16 +69,56 @@ type StaggeredTextProps = {
 export const StaggeredText: FC<StaggeredTextProps> = ({
   phrases,
   visible,
+  mode = 'cycle',
   intervalMs = 3000,
   className = 'text-base text-muted',
   initialDelay = 100,
 }) => {
   const progress = useSharedValue(0)
   const [currentIndex, setCurrentIndex] = useState(0)
+  const [displayPhrase, setDisplayPhrase] = useState(phrases[0])
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const isTransitioning = useRef(false)
+  const prevPhraseRef = useRef(phrases[0])
+  const isMountedRef = useRef(true)
 
+  // Oneshot mode: animate in on mount, re-animate when phrases[0] changes
   useEffect(() => {
+    if (mode !== 'oneshot' || !visible) return
+    isMountedRef.current = true
+
+    const newPhrase = phrases[0]
+    if (prevPhraseRef.current === newPhrase) {
+      // Initial mount — just show immediately
+      setDisplayPhrase(newPhrase)
+      progress.set(1)
+      return
+    }
+
+    // Value changed — fade out, swap, fade in
+    prevPhraseRef.current = newPhrase
+    isTransitioning.current = true
+    progress.set(withTiming(0, { duration: 150 }))
+
+    const timeout = setTimeout(() => {
+      if (!isMountedRef.current) return
+      setDisplayPhrase(newPhrase)
+      setTimeout(() => {
+        if (!isMountedRef.current) return
+        progress.set(1)
+        isTransitioning.current = false
+      }, 50)
+    }, 180)
+
+    return () => {
+      isMountedRef.current = false
+      clearTimeout(timeout)
+    }
+  }, [mode, visible, phrases[0], progress])
+
+  // Cycle mode: rotate through phrases on interval
+  useEffect(() => {
+    if (mode !== 'cycle') return
     if (visible) {
       // Show initial text
       const showTimeout = setTimeout(() => {
@@ -118,11 +160,11 @@ export const StaggeredText: FC<StaggeredTextProps> = ({
         intervalRef.current = null
       }
     }
-  }, [visible, phrases.length, intervalMs, progress])
+  }, [mode, visible, phrases.length, intervalMs, progress, initialDelay])
 
   if (!visible) return null
 
-  const currentPhrase = phrases[currentIndex]
+  const currentPhrase = mode === 'oneshot' ? displayPhrase : phrases[currentIndex]
 
   return (
     <Animated.View className="flex-row flex-wrap">

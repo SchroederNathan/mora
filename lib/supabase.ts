@@ -1,23 +1,38 @@
 import 'react-native-url-polyfill/auto'
 import { createClient } from '@supabase/supabase-js'
-import { createMMKV } from 'react-native-mmkv'
+import { Platform } from 'react-native'
 
-const storage = createMMKV({ id: 'supabase-auth' })
+const isServer = typeof window === 'undefined'
 
-const mmkvAdapter = {
-  getItem: (key: string) => storage.getString(key) ?? null,
-  setItem: (key: string, value: string) => storage.set(key, value),
-  removeItem: (key: string) => { storage.remove(key) },
+const noopStorage = {
+  getItem: (_key: string) => null,
+  setItem: (_key: string, _value: string) => {},
+  removeItem: (_key: string) => {},
 }
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
+function createStorageAdapter() {
+  if (isServer || Platform.OS === 'web') return noopStorage
+  const { createMMKV } = require('react-native-mmkv')
+  const storage = createMMKV({ id: 'supabase-auth' })
+  return {
+    getItem: (key: string) => storage.getString(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => { storage.remove(key) },
+  }
+}
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    storage: mmkvAdapter,
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
-  },
-})
+const mmkvAdapter = createStorageAdapter()
+
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || ''
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY || ''
+
+export const supabase = supabaseUrl
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        storage: mmkvAdapter,
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: false,
+      },
+    })
+  : null as any

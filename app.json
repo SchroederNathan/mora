@@ -14,7 +14,13 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.schroedernathan.macro-ai"
+      "bundleIdentifier": "com.schroedernathan.macro-ai",
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "Allow macro-ai to use speech recognition for voice food logging.",
+        "NSMicrophoneUsageDescription": "Allow macro-ai to use your microphone for voice food logging.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Allow macro-ai to access your photo library to attach food photos."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -24,7 +30,12 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.schroedernathan.macroai"
+      "package": "com.schroedernathan.macroai",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",

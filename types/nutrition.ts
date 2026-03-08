@@ -38,6 +38,8 @@ export type FoodLogEntry = {
   quantity: number;
   snapshot: FoodSnapshot;
   meal?: 'breakfast' | 'lunch' | 'dinner' | 'snack';
+  mealGroupId?: string;
+  mealTitle?: string;
 };
 
 /** Pending food entry awaiting user confirmation in chat */

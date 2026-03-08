@@ -88,7 +88,7 @@ export default function WeeklyCalorieChart({ calorieGoal }: Props) {
     setData(out)
   }, [])
 
-  const { pts, avgPts, goalY } = useMemo(() => {
+  const { pts, avgPts } = useMemo(() => {
     if (data.length === 0) return { pts: [], avgPts: [], goalY: 0 }
     const ceil = Math.max(...data.map(d => d.cal), calorieGoal) * 1.15 || 1
 
@@ -114,7 +114,7 @@ export default function WeeklyCalorieChart({ calorieGoal }: Props) {
 
   // Linear goal trend: cumulative goal vs cumulative actual over 7 days
   // Shows a line from day 1's goal to day 7's goal (calorieGoal * 1 → calorieGoal * 7)
-  const { goalTrendPath, goalStartY, goalEndY } = useMemo(() => {
+  const { goalTrendPath, goalEndY } = useMemo(() => {
     if (data.length === 0) return { goalTrendPath: Skia.Path.Make(), goalStartY: 0, goalEndY: 0 }
     const ceil = Math.max(...data.map(d => d.cal), calorieGoal) * 1.15 || 1
     const startY = PAD.top + drawH - (calorieGoal / ceil) * drawH

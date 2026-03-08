@@ -119,7 +119,7 @@ export default function ChatScreen() {
   const callbackRegistry = useContext(FoodDetailCallbackRegistryContext)
 
   // Zustand stores - destructure functions for stable references
-  const { load: loadDailyLog, addEntry } = useDailyLogStore()
+  const { load: loadDailyLog, addMeal } = useDailyLogStore()
   const { load: loadUserStore } = useUserStore()
 
   // Load stores on mount
@@ -589,19 +589,21 @@ export default function ChatScreen() {
   const handleConfirmLog = useCallback(() => {
     if (pendingEntries.length === 0) return
 
-    // Add all entries to daily log store
-    for (const pending of pendingEntries) {
-      const entry = addEntry({
-        quantity: pending.entry.quantity,
-        snapshot: {
-          name: pending.entry.name,
-          serving: pending.entry.serving,
-          nutrients: pending.entry.nutrients,
-          fdcId: pending.entry.fdcId,
-          estimated: pending.entry.estimated,
-        },
-        meal: pending.entry.meal || getDefaultMeal(),
-      })
+    // Add all entries as a meal group
+    const entries = pendingEntries.map(pending => ({
+      quantity: pending.entry.quantity,
+      snapshot: {
+        name: pending.entry.name,
+        serving: pending.entry.serving,
+        nutrients: pending.entry.nutrients,
+        fdcId: pending.entry.fdcId,
+        estimated: pending.entry.estimated,
+      },
+      meal: pending.entry.meal || getDefaultMeal(),
+    } as const))
+
+    const logged = addMeal(entries, mealTitle)
+    for (const entry of logged) {
       console.log('Food logged:', entry.snapshot.name, entry.snapshot.nutrients.calories, 'cal')
     }
 
@@ -617,7 +619,7 @@ export default function ChatScreen() {
     // Dismiss keyboard and swipe to Dashboard
     Keyboard.dismiss()
     pagerNavigation?.navigateToPage(0)
-  }, [pendingEntries, addEntry, pagerNavigation, setMessages])
+  }, [pendingEntries, addMeal, mealTitle, pagerNavigation, setMessages])
 
   // Handle removing a specific entry from the pending list
   const handleRemoveEntry = useCallback((index: number) => {

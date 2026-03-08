@@ -28,8 +28,12 @@ interface DailyLogActions {
   load: (date?: string) => void;
   /** Add a food entry */
   addEntry: (entry: Omit<FoodLogEntry, 'id' | 'consumedAt'>) => FoodLogEntry;
+  /** Add multiple entries as a meal group */
+  addMeal: (entries: Omit<FoodLogEntry, 'id' | 'consumedAt' | 'mealGroupId' | 'mealTitle'>[], mealTitle?: string | null) => FoodLogEntry[];
   /** Remove a food entry by ID */
   removeEntry: (entryId: string) => void;
+  /** Remove all entries in a meal group */
+  removeMeal: (mealGroupId: string) => void;
   /** Update an existing entry */
   updateEntry: (entryId: string, updates: Partial<Omit<FoodLogEntry, 'id'>>) => void;
   /** Recalculate totals from entries */
@@ -98,6 +102,29 @@ export const useDailyLogStore = create<DailyLogStore>((set, get) => ({
     return entry;
   },
 
+  addMeal: (entryDataList, mealTitle) => {
+    const { log } = get();
+    const now = Date.now();
+    const mealGroupId = generateEntryId();
+
+    const newEntries: FoodLogEntry[] = entryDataList.map((entryData) => ({
+      ...entryData,
+      id: generateEntryId(),
+      consumedAt: now,
+      mealGroupId,
+      mealTitle: mealTitle ?? undefined,
+    }));
+
+    const allEntries = [...log.entries, ...newEntries];
+    const newTotals = calculateTotals(allEntries);
+    const newLog: DailyLog = { ...log, entries: allEntries, totals: newTotals };
+
+    saveDailyLog(newLog);
+    set({ log: newLog });
+
+    return newEntries;
+  },
+
   removeEntry: (entryId) => {
     const { log } = get();
     const newEntries = log.entries.filter(e => e.id !== entryId);
@@ -109,6 +136,16 @@ export const useDailyLogStore = create<DailyLogStore>((set, get) => ({
     };
 
     // Persist to MMKV
+    saveDailyLog(newLog);
+    set({ log: newLog });
+  },
+
+  removeMeal: (mealGroupId) => {
+    const { log } = get();
+    const newEntries = log.entries.filter(e => e.mealGroupId !== mealGroupId);
+    const newTotals = calculateTotals(newEntries);
+    const newLog: DailyLog = { ...log, entries: newEntries, totals: newTotals };
+
     saveDailyLog(newLog);
     set({ log: newLog });
   },

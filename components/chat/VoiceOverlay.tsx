@@ -58,7 +58,6 @@ export function VoiceOverlay({
   const colorScheme = useColorScheme()
   const isDark = colorScheme === 'dark'
 
-  const primaryColor = isDark ? colors.dark.primary : colors.light.primary
   const textColor = isDark ? colors.dark.foreground : colors.light.foreground
   const mutedColor = isDark ? '#a3a3a3' : '#71717a'
   const buttonBg = isDark ? 'rgba(39,39,42,0.8)' : 'rgba(228,228,231,0.8)'

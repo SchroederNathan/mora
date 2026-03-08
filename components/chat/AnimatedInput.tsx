@@ -133,7 +133,7 @@ export const AnimatedInput = forwardRef<AnimatedInputRef, AnimatedInputProps>(fu
       topContentTranslateY.value = 0
       topContentOpacity.value = 1
     }
-  }, [topContentMounted, shouldBeVisible])
+  }, [topContentMounted, shouldBeVisible, topContentOpacity, topContentTranslateY])
 
   const handleTopContentLayout = useCallback((e: any) => {
     const height = e.nativeEvent.layout.height
@@ -144,7 +144,7 @@ export const AnimatedInput = forwardRef<AnimatedInputRef, AnimatedInputProps>(fu
       topContentTranslateY.value = height
       topContentTranslateY.value = withSpring(0)
     }
-  }, [])
+  }, [topContentHeightSV, topContentTranslateY])
 
   const rTopContentStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: topContentTranslateY.value }],
