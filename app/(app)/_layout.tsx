@@ -27,6 +27,22 @@ export default function AppLayout() {
                 sheetAllowedDetents: 'fitToContents',
               }}
             />
+            <Stack.Screen
+              name="food-search"
+              options={{
+                presentation: 'fullScreenModal',
+                headerShown: false,
+                animation: 'slide_from_bottom',
+              }}
+            />
+            <Stack.Screen
+              name="settings"
+              options={{
+                presentation: 'fullScreenModal',
+                headerShown: false,
+                animation: 'slide_from_bottom',
+              }}
+            />
           </Stack>
         </FoodDetailCallbackContext.Provider>
       </FoodDetailCallbackRegistryContext.Provider>

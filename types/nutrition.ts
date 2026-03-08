@@ -64,6 +64,13 @@ export type UserGoals = {
   protein: number;
   carbs: number;
   fat: number;
+  // Body metrics (optional — used for BMR calc)
+  age?: number;
+  weightKg?: number;
+  heightCm?: number;
+  sex?: 'male' | 'female';
+  activityLevel?: 'sedentary' | 'light' | 'moderate' | 'active' | 'very_active';
+  goal?: 'lose' | 'maintain' | 'gain';
 };
 
 // ============================================
