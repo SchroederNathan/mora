@@ -39,7 +39,7 @@ export default function CalorieTracker({ eaten, target }: CalorieTrackerProps) {
 
   useEffect(() => {
     animatedProgress.set(
-      withSpring(progress, { damping: 20, stiffness: 120 })
+      withSpring(progress)
     )
   }, [progress])
 

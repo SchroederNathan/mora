@@ -26,7 +26,7 @@ export default function OnboardingScreen() {
       <View className="flex-1 justify-between px-6 py-16 bg-background">
         <View className="flex-1 justify-center items-center">
           <Text className="text-foreground text-5xl font-bold mb-4 text-center">
-            Miro
+            Mora
           </Text>
           <Text className="text-muted-foreground text-lg text-center">
             Your AI-powered macro tracking companion

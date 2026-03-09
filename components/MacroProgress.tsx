@@ -1,5 +1,12 @@
 import { View } from 'react-native'
 import { Text } from '@/components/ui/Text'
+import { StaggeredText } from '@/components/ui/StaggeredText'
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated'
+import { useEffect } from 'react'
 
 type MacroProgressProps = {
   carbs: number
@@ -18,20 +25,35 @@ type MacroBarProps = {
 
 function MacroBar({ label, current, goal }: MacroBarProps) {
   const progress = Math.min(current / goal, 1)
-  const percentage = progress * 100
+
+  const animatedWidth = useSharedValue(progress)
+
+  useEffect(() => {
+    animatedWidth.set(withSpring(progress))
+  }, [progress])
+
+  const barStyle = useAnimatedStyle(() => ({
+    width: `${animatedWidth.get() * 100}%`,
+  }))
 
   return (
     <View className="flex-1 items-center">
       <Text className="text-foreground text-xs uppercase tracking-wider mb-2">{label}</Text>
       <View className="w-full h-1 bg-foreground/10 rounded-full overflow-hidden">
-        <View
+        <Animated.View
           className="h-full bg-foreground rounded-full"
-          style={{ width: `${percentage}%` }}
+          style={barStyle}
         />
       </View>
-      <Text className="text-foreground text-sm mt-2">
-        {Math.round(current)} / {goal}g
-      </Text>
+      <View className="flex-row mt-2">
+        <StaggeredText
+          phrases={[`${Math.round(current)}`]}
+          visible={true}
+          mode="oneshot"
+          className="text-foreground text-sm"
+        />
+        <Text className="text-foreground text-sm"> / {goal}g</Text>
+      </View>
     </View>
   )
 }

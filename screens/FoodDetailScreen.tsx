@@ -3,6 +3,7 @@ import { SegmentedMacroBar } from '@/components/SegmentedMacroBar'
 import { Text } from '@/components/ui/Text'
 import { useFoodDetailCallbacks } from '@/contexts/FoodDetailCallbackContext'
 import { useDailyLogStore } from '@/stores'
+import { useShallow } from 'zustand/react/shallow'
 import type { FoodConfirmationEntry, FoodLogEntry } from '@/types/nutrition'
 import { scaleMacros, sumMacros } from '@/types/nutrition'
 import { GlassView } from 'expo-glass-effect'
@@ -190,11 +191,11 @@ export default function FoodDetailScreen() {
       : undefined
   )
 
-  const mealEntries = useDailyLogStore(s =>
+  const mealEntries = useDailyLogStore(useShallow(s =>
     mode === 'meal' && params.mealGroupId
       ? s.log.entries.filter(e => e.mealGroupId === params.mealGroupId)
       : []
-  )
+  ))
 
   const mealTitle = mealEntries.length > 0 ? mealEntries[0].mealTitle : undefined
 
@@ -267,10 +268,10 @@ export default function FoodDetailScreen() {
 
   useEffect(() => {
     if (mode === 'logged' && params.entryId && !storeEntry) {
-      router.back()
+      if (router.canGoBack()) router.back()
     }
     if (mode === 'meal' && params.mealGroupId && mealEntries.length === 0) {
-      router.back()
+      if (router.canGoBack()) router.back()
     }
   }, [storeEntry, mode, params.entryId, params.mealGroupId, mealEntries.length, router])
 

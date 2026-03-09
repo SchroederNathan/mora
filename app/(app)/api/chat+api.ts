@@ -2,6 +2,7 @@ import {
   type USDAFoodFull,
   type USDASearchResponse,
 } from '@/types/nutrition';
+import { lookupFoodCache, writeFoodCache } from '@/lib/foodCache';
 import { createGateway } from '@ai-sdk/gateway';
 import { convertToModelMessages, stepCountIs, streamText, UIMessage } from 'ai';
 import { fetch as expoFetch } from 'expo/fetch';
@@ -244,6 +245,12 @@ export async function POST(req: Request) {
               .describe(
                 "Your estimated sugar (g) per serving if USDA lookup fails",
               ),
+            servingUnit: z
+              .string()
+              .optional()
+              .describe(
+                'The serving unit the user specified (e.g., "cup", "oz", "slice", "tbsp"). Extract from user input like "1 cup milk" → "cup".',
+              ),
           }),
           execute: async ({
             foodQuery,
@@ -256,8 +263,50 @@ export async function POST(req: Request) {
             estimatedFat,
             estimatedFiber,
             estimatedSugar,
+            servingUnit,
           }) => {
             console.log("[LOOKUP] Searching for:", foodQuery);
+
+            // ── Cache check ─────────────────────────────────────
+            try {
+              const cached = await lookupFoodCache(foodQuery);
+              if (cached) {
+                console.log(
+                  "[LOOKUP] Cache hit |",
+                  displayName,
+                  cached.calories,
+                  "cal (source:",
+                  cached.source + ")",
+                );
+                return {
+                  success: true,
+                  entry: {
+                    name: displayName,
+                    quantity,
+                    serving: {
+                      amount: 1,
+                      unit: cached.servingDescription || "serving",
+                      gramWeight: cached.servingGramWeight || 100,
+                    },
+                    nutrients: {
+                      calories: cached.calories,
+                      protein: cached.protein,
+                      carbs: cached.carbs,
+                      fat: cached.fat,
+                      fiber: cached.fiber,
+                      sugar: cached.sugar,
+                    },
+                    meal,
+                    fdcId: cached.fdcId,
+                  },
+                  estimated: cached.source !== "usda",
+                  source: cached.source,
+                  message: `Logged ${quantity} ${displayName} (${cached.source === "usda" ? "" : cached.source + ": "}${cached.calories} cal)`,
+                };
+              }
+            } catch (cacheErr) {
+              console.error("[LOOKUP] Cache lookup error:", cacheErr);
+            }
 
             // LLM-provided fallback macros (per serving) — last resort after Perplexity
             const hasLLMEstimate =
@@ -285,23 +334,35 @@ export async function POST(req: Request) {
               },
               source: "usda" | "perplexity" | "estimate",
               servingDesc?: string,
-            ) => ({
-              success: true,
-              entry: {
-                name: displayName,
-                quantity,
-                serving: {
-                  amount: 1,
-                  unit: servingDesc || "serving",
-                  gramWeight: 100,
+              fdcId?: number,
+            ) => {
+              // Fire-and-forget cache write
+              writeFoodCache(foodQuery, {
+                ...nutrients,
+                source,
+                servingDescription: servingDesc,
+                servingGramWeight: 100,
+                fdcId,
+              }).catch(() => {});
+
+              return {
+                success: true,
+                entry: {
+                  name: displayName,
+                  quantity,
+                  serving: {
+                    amount: 1,
+                    unit: servingDesc || "serving",
+                    gramWeight: 100,
+                  },
+                  nutrients,
+                  meal,
                 },
-                nutrients,
-                meal,
-              },
-              estimated: source !== "usda",
-              source,
-              message: `Logged ${quantity} ${displayName} (${source === "usda" ? "" : source + ": "}${nutrients.calories} cal)`,
-            });
+                estimated: source !== "usda",
+                source,
+                message: `Logged ${quantity} ${displayName} (${source === "usda" ? "" : source + ": "}${nutrients.calories} cal)`,
+              };
+            };
 
             // Helper: try Perplexity, then LLM estimate, then return null
             const tryFallbacks = async () => {
@@ -392,25 +453,36 @@ export async function POST(req: Request) {
                 };
               }
 
-              // Find the best matching result - prefer results that contain query words
+              // Find the best matching result
+              // Score: query word matches + bonus for Survey (FNDDS) data + penalty for long descriptions
               const queryWords = enhancedQuery
                 .toLowerCase()
                 .split(" ")
                 .filter((w) => w.length > 2);
               let bestMatch = searchData.foods[0];
-              let bestMatchCount = 0;
+              let bestScore = -1;
 
               for (const food of searchData.foods) {
                 const desc = food.description.toLowerCase();
                 const matchCount = queryWords.filter((w) =>
                   desc.includes(w),
                 ).length;
+                // Prefer Survey (FNDDS) — these are common foods with reliable portions
+                const dataTypeBonus =
+                  food.dataType === "Survey (FNDDS)" ? 0.5 : 0;
+                // Prefer simpler descriptions (closer to what user searched)
+                const wordCount = desc.split(/[,\s]+/).length;
+                const simplicityBonus = wordCount <= 4 ? 0.3 : 0;
+                const score = matchCount + dataTypeBonus + simplicityBonus;
 
-                if (matchCount > bestMatchCount) {
+                if (score > bestScore) {
                   bestMatch = food;
-                  bestMatchCount = matchCount;
+                  bestScore = score;
                 }
               }
+              const bestMatchCount = queryWords.filter((w) =>
+                bestMatch.description.toLowerCase().includes(w),
+              ).length;
 
               // If fewer than half of query words match, USDA result is likely wrong — try fallbacks
               const matchRatio =
@@ -515,17 +587,58 @@ export async function POST(req: Request) {
 
               console.log("[LOOKUP] Macros per 100g:", macros);
 
-              // Get a reasonable serving size - prefer medium-sized portions
+              // Get a reasonable serving size
+              // Priority: 1) match user's unit, 2) "medium", 3) "cup", 4) first portion
               let portion = food.foodPortions?.[0];
 
-              if (food.foodPortions && food.foodPortions.length > 1) {
-                const mediumPortion = food.foodPortions.find(
-                  (p: any) =>
-                    p.modifier?.toLowerCase().includes("medium") ||
-                    p.portionDescription?.toLowerCase().includes("medium"),
-                );
-                if (mediumPortion) {
-                  portion = mediumPortion;
+              if (food.foodPortions && food.foodPortions.length > 0) {
+                const portions = food.foodPortions;
+                const portionText = (p: any) =>
+                  `${p.modifier || ""} ${p.portionDescription || ""}`.toLowerCase();
+
+                // 1. Match user's requested unit (e.g. "cup", "oz", "slice")
+                let matched = false;
+                if (servingUnit) {
+                  const unitLower = servingUnit.toLowerCase();
+                  const unitMatch = portions.find((p: any) =>
+                    portionText(p).includes(unitLower),
+                  );
+                  if (unitMatch) {
+                    portion = unitMatch;
+                    matched = true;
+                  }
+                }
+
+                // 2. If no user unit match, prefer "medium" for countable items
+                if (!matched) {
+                  const mediumPortion = portions.find((p: any) =>
+                    portionText(p).includes("medium"),
+                  );
+                  if (mediumPortion) {
+                    portion = mediumPortion;
+                  }
+                }
+
+                // 3. If still on a weird portion like "package yields", prefer "cup" or a standard measure
+                const currentText = portionText(portion);
+                if (
+                  currentText.includes("package") ||
+                  currentText.includes("yield") ||
+                  currentText.includes("nfs")
+                ) {
+                  const betterPortion = portions.find((p: any) => {
+                    const t = portionText(p);
+                    return (
+                      t.includes("cup") ||
+                      t.includes("tbsp") ||
+                      t.includes("oz") ||
+                      t.includes("piece") ||
+                      t.includes("slice")
+                    );
+                  });
+                  if (betterPortion) {
+                    portion = betterPortion;
+                  }
                 }
               }
 
@@ -564,6 +677,15 @@ export async function POST(req: Request) {
                 "cal per",
                 serving.unit,
               );
+
+              // Fire-and-forget cache write
+              writeFoodCache(foodQuery, {
+                ...nutrients,
+                source: "usda",
+                servingDescription: serving.unit,
+                servingGramWeight: serving.gramWeight,
+                fdcId,
+              }).catch(() => {});
 
               return {
                 success: true,
@@ -799,7 +921,7 @@ export async function POST(req: Request) {
           // No execute — answer comes from client via addToolOutput
         },
       },
-      system: `You are Miro, a friendly macro-tracking assistant.
+      system: `You are Mora, a friendly macro-tracking assistant.
 
 When a user says they ate something (like "I had a banana" or "ate chicken for lunch"):
 1. First, check if you need more details — use ask_user to clarify portion size, preparation, type, etc. (see CLARIFICATION section below)

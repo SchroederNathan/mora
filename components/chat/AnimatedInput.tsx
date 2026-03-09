@@ -97,15 +97,22 @@ export const AnimatedInput = forwardRef<AnimatedInputRef, AnimatedInputProps>(fu
   // Shared value that mirrors shouldBeVisible — updated synchronously during render
   // so the UI thread sees the change on the same frame React commits
   const topContentVisibleSV = useSharedValue(shouldBeVisible)
-  topContentVisibleSV.value = shouldBeVisible
+  useEffect(() => {
+    topContentVisibleSV.value = shouldBeVisible
+  }, [shouldBeVisible, topContentVisibleSV])
 
   // Mount synchronously during render (enter path)
   if (shouldBeVisible && (topContent || topContentRef.current) && !topContentMounted) {
     isEnteringRef.current = true
-    topContentTranslateY.value = 1000 // start off-screen until onLayout measures
-    topContentOpacity.value = 1
     setTopContentMounted(true)
   }
+
+  useEffect(() => {
+    if (topContentMounted && isEnteringRef.current) {
+      topContentTranslateY.value = 1000 // start off-screen until onLayout measures
+      topContentOpacity.value = 1
+    }
+  }, [topContentMounted, topContentTranslateY, topContentOpacity])
 
   // Exit animation — runs on UI thread immediately when shared value transitions true → false
   useAnimatedReaction(

@@ -6,7 +6,7 @@ import type { UIMessage } from 'ai';
 // MMKV Instance
 // ============================================
 
-export const storage = createMMKV({ id: 'macro-ai-data' });
+export const storage = createMMKV({ id: 'mora-data' });
 
 // ============================================
 // Storage Keys

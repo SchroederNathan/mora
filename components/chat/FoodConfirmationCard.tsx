@@ -46,12 +46,6 @@ function formatMealName(meal: string): string {
   return meal.charAt(0).toUpperCase() + meal.slice(1)
 }
 
-function formatServing(quantity: number, serving: { amount: number; unit: string }): string {
-  const total = quantity * serving.amount
-  if (total === 1 && serving.unit.toLowerCase() === 'serving') return '1 serving'
-  if (total === 1) return `${total} ${serving.unit}`
-  return `${total} × ${serving.unit}`
-}
 
 // Edit mode entry row
 type EditEntryRowProps = {
@@ -97,7 +91,7 @@ const EditEntryRow = memo(function EditEntryRow({
           {entry.name}
         </Text>
         <Text className="text-muted text-base">
-          {formatServing(entry.quantity, entry.serving)}
+          {entry.serving.amount} {entry.serving.unit}
         </Text>
       </View>
 

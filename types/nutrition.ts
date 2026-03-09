@@ -195,6 +195,20 @@ export const DEFAULT_USER_GOALS: UserGoals = {
   fat: 65,
 };
 
+/** Cached nutrition result from Supabase food cache */
+export type CachedNutrition = {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  fiber: number;
+  sugar: number;
+  servingDescription?: string;
+  servingGramWeight?: number;
+  source: 'usda' | 'perplexity' | 'estimate';
+  fdcId?: number;
+};
+
 /** Empty macro totals */
 export const EMPTY_MACRO_TOTALS: MacroTotals = {
   calories: 0,

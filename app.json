@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "macro-ai",
-    "slug": "macro-ai",
-    "scheme": "macro-ai",
+    "name": "Mora",
+    "slug": "mora",
+    "scheme": "mora",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -14,12 +14,12 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.schroedernathan.macro-ai",
+      "bundleIdentifier": "com.schroedernathan.mora",
       "infoPlist": {
         "NSSpeechRecognitionUsageDescription": "Allow macro-ai to use speech recognition for voice food logging.",
-        "NSMicrophoneUsageDescription": "Allow macro-ai to use your microphone for voice food logging.",
+        "NSMicrophoneUsageDescription": "Allow Mora to use your microphone for voice food logging.",
         "ITSAppUsesNonExemptEncryption": false,
-        "NSPhotoLibraryUsageDescription": "Allow macro-ai to access your photo library to attach food photos."
+        "NSPhotoLibraryUsageDescription": "Allow Mora to access your photo library to attach food photos."
       }
     },
     "android": {
@@ -30,7 +30,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.schroedernathan.macroai",
+      "package": "com.schroedernathan.mora",
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.FOREGROUND_SERVICE",
@@ -59,14 +59,14 @@
       [
         "expo-speech-recognition",
         {
-          "microphonePermission": "Allow macro-ai to use your microphone for voice food logging.",
-          "speechRecognitionPermission": "Allow macro-ai to use speech recognition for voice food logging."
+          "microphonePermission": "Allow Mora to use your microphone for voice food logging.",
+          "speechRecognitionPermission": "Allow Mora to use speech recognition for voice food logging."
         }
       ],
       [
         "react-native-audio-api",
         {
-          "iosMicrophonePermission": "Allow macro-ai to use your microphone for voice food logging."
+          "iosMicrophonePermission": "Allow Mora to use your microphone for voice food logging."
         }
       ]
     ],
