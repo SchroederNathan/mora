@@ -3,14 +3,21 @@ import DatePicker from "@/components/DatePicker"
 import { FoodHistory } from "@/components/FoodEntryCard"
 import MacroProgress from "@/components/MacroProgress"
 import WeeklyCalorieChart from "@/components/WeeklyCalorieChart"
+import { colors } from "@/constants/colors"
 import { useDailyLogStore, useUserStore } from "@/stores"
+import { useRouter } from "expo-router"
+import { Plus } from "lucide-react-native"
 import { useCallback, useEffect } from "react"
-import { ScrollView, View } from "react-native"
+import { Pressable, ScrollView, useColorScheme, View } from "react-native"
+import { Haptics } from "react-native-nitro-haptics"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
 
 export default function HomeScreen() {
     const insets = useSafeAreaInsets()
     const headerHeight = insets.top + 44
+    const router = useRouter()
+    const colorScheme = useColorScheme()
+    const isDark = colorScheme === 'dark'
 
     // Subscribe to specific values from stores (this ensures re-renders)
     const calories = useDailyLogStore(state => state.log.totals.calories)
@@ -40,6 +47,11 @@ export default function HomeScreen() {
     const handleDateSelect = useCallback((date: string) => {
         loadDailyLog(date)
     }, [loadDailyLog])
+
+    const handleOpenFoodSearch = useCallback(() => {
+        Haptics.impact('light')
+        router.push('/(app)/food-search')
+    }, [router])
 
     return (
         <View className="flex-1">
@@ -71,6 +83,29 @@ export default function HomeScreen() {
                     {/* <WeeklyCalorieChart calorieGoal={targetCalories} /> */}
                 </View>
             </ScrollView>
+
+            {/* FAB: Quick Add Food */}
+            <Pressable
+                onPress={handleOpenFoodSearch}
+                style={{
+                    position: 'absolute',
+                    right: 20,
+                    bottom: insets.bottom + 20,
+                    width: 56,
+                    height: 56,
+                    borderRadius: 28,
+                    backgroundColor: isDark ? colors.dark.primary : colors.light.primary,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    shadowColor: isDark ? colors.dark.primary : colors.light.primary,
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.4,
+                    shadowRadius: 8,
+                    elevation: 8,
+                }}
+            >
+                <Plus size={26} color="#fff" strokeWidth={2.5} />
+            </Pressable>
         </View>
     )
 }
