@@ -1,6 +1,7 @@
 import { AnimatedInput, type AnimatedInputRef, ClarificationCard, EmptyStateCarousels, FoodConfirmationCard, type FoodConfirmationEntry, MessageBubble, MIN_INPUT_HEIGHT } from '@/components/chat'
 import { ThinkingDropdown } from '@/components/chat/ThinkingDropdown'
 import { VoiceOverlay } from '@/components/chat/VoiceOverlay'
+import { useRealtimeVoiceChat } from '@/hooks/useRealtimeVoiceChat'
 import { useVoiceChat } from '@/hooks/useVoiceChat'
 import { generateAPIUrl } from '@/utils'
 import { getDailyLog, getUserGoals } from '@/lib/storage'
@@ -72,6 +73,8 @@ type ToolActivity = {
   foodQuery: string | null
 }
 
+type VoiceTransport = 'realtime' | 'legacy'
+
 export default function ChatScreen() {
   const [input, setInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
@@ -99,15 +102,19 @@ export default function ChatScreen() {
   const [voiceMode, setVoiceMode] = useState(false)
   const [isMuted, setIsMuted] = useState(false)
   const [lastAssistantText, setLastAssistantText] = useState('')
+  const [voiceTransport, setVoiceTransport] = useState<VoiceTransport>('realtime')
 
   const processedToolCallsRef = useRef<Set<string>>(new Set())
   const voiceModeRef = useRef(false)
-  const voiceSpeakRef = useRef<(text: string) => Promise<void>>()
-  const voiceStartListeningRef = useRef<() => Promise<void>>()
+  const legacySpeakRef = useRef<(text: string) => Promise<void>>()
+  const legacyStartListeningRef = useRef<() => Promise<void>>()
   const pendingClarificationRef = useRef<typeof pendingClarification>(null)
   const addToolOutputRef = useRef<typeof addToolOutput>(null as any)
   const spokenToolCallsRef = useRef<Set<string>>(new Set())
   const voiceModeWhenSentRef = useRef(false)
+  const voicePrefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const realtimeAssistantMessageIdRef = useRef<string | null>(null)
+  const realtimeSubmitToolResponseRef = useRef<(toolCallId: string, output: unknown) => void>()
   const listRef = useRef<FlashListRef<any>>(null)
   const inputRef = useRef<AnimatedInputRef>(null)
   const insets = useSafeAreaInsets()
@@ -132,42 +139,49 @@ export default function ChatScreen() {
     loadUserStore()
   }, [loadDailyLog, loadUserStore])
 
+  const buildAssistantContext = useCallback(() => {
+    const today = new Date()
+    const todayKey = formatDateKey(today)
+    const foodHistory = []
+
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(today)
+      d.setDate(d.getDate() - i)
+      const dateKey = formatDateKey(d)
+      const log = getDailyLog(dateKey)
+      if (!log || log.entries.length === 0) continue
+
+      foodHistory.push({
+        date: log.date,
+        entries: log.entries.map(e => ({
+          name: e.snapshot.name,
+          quantity: e.quantity,
+          meal: e.meal,
+          nutrients: e.snapshot.nutrients,
+        })),
+        totals: log.totals,
+      })
+    }
+
+    const userGoals = getUserGoals()
+    console.log(`[BODY] Sending ${foodHistory.length} days of history, userGoals:`, userGoals)
+
+    return {
+      voiceMode: voiceModeRef.current,
+      foodHistory,
+      userGoals,
+      todayDateKey: todayKey,
+    }
+  }, [])
+
   const { messages, error, sendMessage, addToolOutput, setMessages } = useChat({
     transport: new DefaultChatTransport({
       fetch: expoFetch as unknown as typeof globalThis.fetch,
       api: generateAPIUrl('/api/chat'),
       body: () => {
-        const today = new Date()
-        const todayKey = formatDateKey(today)
-        console.log('[BODY] Building request body, todayDateKey:', todayKey)
-        const foodHistory = []
-        for (let i = 0; i < 14; i++) {
-          const d = new Date(today)
-          d.setDate(d.getDate() - i)
-          const dateKey = formatDateKey(d)
-          const log = getDailyLog(dateKey)
-          if (log && log.entries.length > 0) {
-            console.log(`[BODY] Found log for ${dateKey}: ${log.entries.length} entries, totals:`, log.totals)
-            foodHistory.push({
-              date: log.date,
-              entries: log.entries.map(e => ({
-                name: e.snapshot.name,
-                quantity: e.quantity,
-                meal: e.meal,
-                nutrients: e.snapshot.nutrients,
-              })),
-              totals: log.totals,
-            })
-          }
-        }
-        const goals = getUserGoals()
-        console.log(`[BODY] Sending ${foodHistory.length} days of history, userGoals:`, goals)
-        return {
-          voiceMode: voiceModeRef.current,
-          foodHistory,
-          userGoals: goals,
-          todayDateKey: todayKey,
-        }
+        const context = buildAssistantContext()
+        console.log('[BODY] Building request body, todayDateKey:', context.todayDateKey)
+        return context
       },
     }),
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
@@ -179,7 +193,7 @@ export default function ChatScreen() {
       if (voiceModeRef.current) {
         setTimeout(() => {
           if (voiceModeRef.current) {
-            voiceStartListeningRef.current?.()
+            legacyStartListeningRef.current?.()
           }
         }, 500)
       }
@@ -212,13 +226,12 @@ export default function ChatScreen() {
             .map((p: any) => p.text.trim())
             .join(' ')
           if (textParts) {
-            setLastAssistantText(textParts)
-            voiceSpeakRef.current?.(textParts)
+            legacySpeakRef.current?.(textParts)
           } else {
             // No speakable text (tool-only response) — restart listening
             setTimeout(() => {
               if (voiceModeRef.current) {
-                voiceStartListeningRef.current?.()
+                legacyStartListeningRef.current?.()
               }
             }, 300)
           }
@@ -227,8 +240,214 @@ export default function ChatScreen() {
     },
   })
 
-  // Voice chat hook
-  const voiceChat = useVoiceChat({
+  const createVoiceMessageId = useCallback(
+    (role: 'user' | 'assistant') =>
+      `voice-${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    [],
+  )
+
+  const appendVoiceUserMessage = useCallback((text: string) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+
+    const messageId = createVoiceMessageId('user')
+    setMessages(prev => [...prev, {
+      id: messageId,
+      role: 'user',
+      parts: [{ type: 'text', text: trimmed }],
+    }])
+  }, [createVoiceMessageId, setMessages])
+
+  const updateRealtimeAssistantMessage = useCallback((
+    update: (message: UIMessage) => UIMessage,
+  ) => {
+    let messageId = realtimeAssistantMessageIdRef.current
+    if (!messageId) {
+      messageId = createVoiceMessageId('assistant')
+      realtimeAssistantMessageIdRef.current = messageId
+    }
+
+    setMessages(prev => {
+      let found = false
+      const next = prev.map(message => {
+        if (message.id !== messageId) return message
+        found = true
+        return update(message)
+      })
+
+      if (found) return next
+
+      return [...next, update({
+        id: messageId,
+        role: 'assistant',
+        parts: [],
+      } as UIMessage)]
+    })
+
+    return messageId
+  }, [createVoiceMessageId, setMessages])
+
+  const upsertRealtimeAssistantText = useCallback((
+    text: string,
+    state: 'streaming' | 'done' = 'streaming',
+  ) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+
+    updateRealtimeAssistantMessage(message => {
+      const parts = [...(message.parts || [])]
+      const existingIndex = parts.findIndex(part => part.type === 'text')
+      const textPart = { type: 'text', text: trimmed, state } as const
+
+      if (existingIndex === -1) {
+        parts.unshift(textPart as any)
+      } else {
+        parts[existingIndex] = textPart as any
+      }
+
+      return { ...message, parts }
+    })
+    setLastAssistantText(trimmed)
+  }, [updateRealtimeAssistantMessage])
+
+  const upsertRealtimeToolPart = useCallback((
+    toolName: string,
+    toolCallId: string,
+    patch: Record<string, unknown>,
+  ) => {
+    updateRealtimeAssistantMessage(message => {
+      const parts = [...(message.parts || [])]
+      const partType = `tool-${toolName}`
+      const existingIndex = parts.findIndex((part: any) =>
+        part.type === partType && part.toolCallId === toolCallId)
+      const nextPart = {
+        ...(existingIndex >= 0 ? parts[existingIndex] as any : {}),
+        type: partType,
+        toolCallId,
+        ...patch,
+      }
+
+      if (existingIndex === -1) {
+        parts.push(nextPart)
+      } else {
+        parts[existingIndex] = nextPart
+      }
+
+      return { ...message, parts }
+    })
+  }, [updateRealtimeAssistantMessage])
+
+  const realtimeVoiceChat = useRealtimeVoiceChat({
+    getToolContext: buildAssistantContext,
+    onTranscript: (text, isFinal) => {
+      if (!isFinal || !text.trim()) return
+
+      appendVoiceUserMessage(text)
+      realtimeAssistantMessageIdRef.current = null
+      setIsThinking(true)
+      setThinkingStartTime(Date.now())
+      setLastAssistantText('')
+
+      const clarification = pendingClarificationRef.current
+      if (clarification) {
+        upsertRealtimeToolPart('ask_user', clarification.toolCallId, {
+          state: 'output-available',
+          input: {
+            question: clarification.question,
+            options: clarification.options,
+            allowFreeform: clarification.allowFreeform,
+            context: clarification.context,
+          },
+          output: text,
+        })
+        realtimeSubmitToolResponseRef.current?.(clarification.toolCallId, text)
+        setPendingClarification(null)
+      } else {
+        setToolActivity({ toolName: null, toolState: null, foodQuery: null })
+      }
+    },
+    onAssistantTranscript: (text, isFinal) => {
+      if (!text.trim()) return
+      upsertRealtimeAssistantText(text, isFinal ? 'done' : 'streaming')
+    },
+    onAssistantTurnComplete: (text) => {
+      if (text.trim()) {
+        upsertRealtimeAssistantText(text, 'done')
+      }
+      setTimeout(() => {
+        setToolActivity({ toolName: null, toolState: null, foodQuery: null })
+      }, 1500)
+      setIsThinking(false)
+      realtimeAssistantMessageIdRef.current = null
+    },
+    onToolCallStart: call => {
+      upsertRealtimeToolPart(call.name, call.id, {
+        state: 'input-available',
+        input: call.input,
+      })
+
+      const foodQuery =
+        typeof call.input.foodQuery === 'string'
+          ? call.input.foodQuery
+          : typeof call.input.foodName === 'string'
+            ? call.input.foodName
+            : typeof call.input.question === 'string'
+              ? call.input.question
+              : null
+
+      setToolActivity({
+        toolName: `tool-${call.name}`,
+        toolState: 'input-available',
+        foodQuery,
+      })
+      setIsThinking(true)
+    },
+    onToolCallResult: (call, output) => {
+      upsertRealtimeToolPart(call.name, call.id, {
+        state: 'output-available',
+        input: call.input,
+        output,
+      })
+
+      const foodQuery =
+        typeof call.input.foodQuery === 'string'
+          ? call.input.foodQuery
+          : typeof call.input.foodName === 'string'
+            ? call.input.foodName
+            : typeof call.input.question === 'string'
+              ? call.input.question
+              : null
+
+      setToolActivity({
+        toolName: `tool-${call.name}`,
+        toolState: 'output-available',
+        foodQuery,
+      })
+    },
+    onToolCallError: (call, error) => {
+      upsertRealtimeToolPart(call.name, call.id, {
+        state: 'output-error',
+        input: call.input,
+        errorText: error,
+      })
+      setToolActivity({
+        toolName: `tool-${call.name}`,
+        toolState: 'output-error',
+        foodQuery: null,
+      })
+      setIsThinking(false)
+    },
+    onError: error => {
+      console.error('[VOICE LIVE] Error:', error)
+    },
+    onNeedsFallback: reason => {
+      console.warn('[VOICE LIVE] Falling back to legacy voice:', reason)
+      void fallbackToLegacyVoice()
+    },
+  })
+
+  // Legacy voice chat hook
+  const legacyVoiceChat = useVoiceChat({
     onTranscript: (text, isFinal) => {
       if (isFinal && text.trim()) {
         // If there's a pending clarification, route the answer to addToolOutput
@@ -252,12 +471,15 @@ export default function ChatScreen() {
         }
       }
     },
+    onSpeakingStart: (text) => {
+      setLastAssistantText(text)
+    },
     onSpeakingEnd: () => {
       // Auto-resume listening after TTS finishes
       if (voiceModeRef.current) {
         setTimeout(() => {
           if (voiceModeRef.current) {
-            voiceStartListeningRef.current?.()
+            legacyStartListeningRef.current?.()
           }
         }, 300)
       }
@@ -266,13 +488,35 @@ export default function ChatScreen() {
 
   // Keep function refs in sync
   useEffect(() => {
-    voiceSpeakRef.current = voiceChat.speak
-    voiceStartListeningRef.current = voiceChat.startListening
-  }, [voiceChat.speak, voiceChat.startListening])
+    legacySpeakRef.current = legacyVoiceChat.speak
+    legacyStartListeningRef.current = legacyVoiceChat.startListening
+    realtimeSubmitToolResponseRef.current = realtimeVoiceChat.submitToolResponse
+  }, [
+    legacyVoiceChat.speak,
+    legacyVoiceChat.startListening,
+    realtimeVoiceChat.submitToolResponse,
+  ])
 
   useEffect(() => {
     addToolOutputRef.current = addToolOutput
   }, [addToolOutput])
+
+  const fallbackToLegacyVoice = useCallback(async () => {
+    if (!voiceModeRef.current) return
+
+    realtimeVoiceChat.disconnect()
+    setVoiceTransport('legacy')
+    legacyVoiceChat.setVoiceModeActive(true)
+    await legacyVoiceChat.startListening()
+  }, [legacyVoiceChat, realtimeVoiceChat])
+
+  useEffect(() => {
+    return () => {
+      if (voicePrefetchTimerRef.current) {
+        clearTimeout(voicePrefetchTimerRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     pendingClarificationRef.current = pendingClarification
@@ -283,42 +527,93 @@ export default function ChatScreen() {
     voiceModeRef.current = voiceMode
   }, [voiceMode])
 
-  const enterVoiceMode = useCallback(() => {
+  useEffect(() => {
+    if (!voiceModeWhenSentRef.current) return
+    if (voiceTransport !== 'legacy') return
+
+    const lastUserMessageIndex = messages.findLastIndex(m => m.role === 'user')
+    if (lastUserMessageIndex === -1) return
+
+    const assistantMessagesAfterUser = messages
+      .slice(lastUserMessageIndex + 1)
+      .filter(m => m.role === 'assistant')
+    const lastAssistantMessage = assistantMessagesAfterUser[assistantMessagesAfterUser.length - 1]
+    if (!lastAssistantMessage?.parts) return
+
+    const textParts = lastAssistantMessage.parts
+      .filter((p: any) => p.type === 'text' && p.text?.trim())
+      .map((p: any) => p.text.trim())
+      .join(' ')
+
+    if (!textParts) return
+
+    if (voicePrefetchTimerRef.current) {
+      clearTimeout(voicePrefetchTimerRef.current)
+    }
+
+    voicePrefetchTimerRef.current = setTimeout(() => {
+      legacyVoiceChat.prefetchSpeech(textParts)
+    }, 150)
+  }, [legacyVoiceChat, messages, voiceTransport])
+
+  const enterVoiceMode = useCallback(async () => {
     Keyboard.dismiss()
     setVoiceMode(true)
+    setIsMuted(false)
+    setLastAssistantText('')
     voiceModeRef.current = true
-    voiceChat.setVoiceModeActive(true)
-    voiceChat.startListening()
-  }, [voiceChat])
+    legacyVoiceChat.setVoiceModeActive(false)
+    setVoiceTransport('realtime')
+
+    const connected = await realtimeVoiceChat.connect()
+    if (!connected) {
+      setVoiceTransport('legacy')
+      legacyVoiceChat.setVoiceModeActive(true)
+      await legacyVoiceChat.startListening()
+    }
+  }, [legacyVoiceChat, realtimeVoiceChat])
 
   const exitVoiceMode = useCallback(() => {
     setVoiceMode(false)
     setIsMuted(false)
     voiceModeRef.current = false
-    voiceChat.setVoiceModeActive(false)
-    voiceChat.stopListening()
-    voiceChat.stopSpeaking()
-  }, [voiceChat])
+    realtimeVoiceChat.disconnect()
+    legacyVoiceChat.setVoiceModeActive(false)
+    legacyVoiceChat.stopListening()
+    legacyVoiceChat.stopSpeaking()
+  }, [legacyVoiceChat, realtimeVoiceChat])
 
   // Soft exit: close UI and stop listening, but let TTS finish
   const softExitVoiceMode = useCallback(() => {
     setVoiceMode(false)
     setIsMuted(false)
     voiceModeRef.current = false
-    voiceChat.setVoiceModeActive(false)
-    voiceChat.stopListening()
-  }, [voiceChat])
+    if (voiceTransport === 'realtime') {
+      realtimeVoiceChat.disconnect()
+    } else {
+      legacyVoiceChat.setVoiceModeActive(false)
+      legacyVoiceChat.stopListening()
+    }
+  }, [legacyVoiceChat, realtimeVoiceChat, voiceTransport])
 
   const toggleMute = useCallback(() => {
     setIsMuted(prev => {
       if (!prev) {
-        voiceChat.stopListening()
+        if (voiceTransport === 'realtime') {
+          realtimeVoiceChat.mute()
+        } else {
+          legacyVoiceChat.stopListening()
+        }
       } else {
-        voiceChat.startListening()
+        if (voiceTransport === 'realtime') {
+          realtimeVoiceChat.unmute()
+        } else {
+          legacyVoiceChat.startListening()
+        }
       }
       return !prev
     })
-  }, [voiceChat])
+  }, [legacyVoiceChat, realtimeVoiceChat, voiceTransport])
 
   // Fade out chat content when voice mode is active
   const chatOpacity = useSharedValue(1)
@@ -330,14 +625,18 @@ export default function ChatScreen() {
   }))
 
   const handleVoiceInterrupt = useCallback(() => {
-    voiceChat.stopSpeaking()
-    // Start listening again after interrupting
+    if (voiceTransport === 'realtime') {
+      realtimeVoiceChat.interrupt()
+      return
+    }
+
+    legacyVoiceChat.stopSpeaking()
     setTimeout(() => {
       if (voiceModeRef.current) {
-        voiceChat.startListening()
+        legacyVoiceChat.startListening()
       }
     }, 200)
-  }, [voiceChat])
+  }, [legacyVoiceChat, realtimeVoiceChat, voiceTransport])
 
   // Watch messages for tool activity and results
   useEffect(() => {
@@ -429,7 +728,9 @@ export default function ChatScreen() {
                 .join(' ')
               const spokenText = textParts || input.question
               setLastAssistantText(spokenText)
-              voiceSpeakRef.current?.(spokenText)
+              if (voiceTransport === 'legacy') {
+                legacySpeakRef.current?.(spokenText)
+              }
             }
           } else if (partAny.state === 'output-available') {
             processedToolCallsRef.current.add(toolCallId)
@@ -511,7 +812,7 @@ export default function ChatScreen() {
         }
       }
     }
-  }, [messages])
+  }, [messages, voiceTransport])
 
   // Base bottom padding: input height + safe area + some margin
   const cardVisible = showCard
@@ -567,14 +868,36 @@ export default function ChatScreen() {
     Haptics.selection()
     setIsThinking(true)
     setThinkingStartTime(Date.now())
-    addToolOutput({
-      tool: 'ask_user',
-      toolCallId: pendingClarification.toolCallId,
-      output: answer,
-    })
+    if (voiceModeRef.current && voiceTransport === 'realtime') {
+      appendVoiceUserMessage(answer)
+      upsertRealtimeToolPart('ask_user', pendingClarification.toolCallId, {
+        state: 'output-available',
+        input: {
+          question: pendingClarification.question,
+          options: pendingClarification.options,
+          allowFreeform: pendingClarification.allowFreeform,
+          context: pendingClarification.context,
+        },
+        output: answer,
+      })
+      realtimeSubmitToolResponseRef.current?.(pendingClarification.toolCallId, answer)
+      realtimeAssistantMessageIdRef.current = null
+    } else {
+      addToolOutput({
+        tool: 'ask_user',
+        toolCallId: pendingClarification.toolCallId,
+        output: answer,
+      })
+    }
     setPendingClarification(null)
     setClarificationDismissing(false)
-  }, [pendingClarification, addToolOutput])
+  }, [
+    addToolOutput,
+    appendVoiceUserMessage,
+    pendingClarification,
+    upsertRealtimeToolPart,
+    voiceTransport,
+  ])
 
   // Helper to get default meal based on time of day
   const getDefaultMeal = (): 'breakfast' | 'lunch' | 'dinner' | 'snack' => {
@@ -755,6 +1078,17 @@ export default function ChatScreen() {
     )
   }, [isThinking, thinkingStartTime, toolActivity])
 
+  const activeVoiceState =
+    voiceTransport === 'realtime' ? realtimeVoiceChat.state : legacyVoiceChat.state
+  const activeVoiceTranscript =
+    voiceTransport === 'realtime'
+      ? realtimeVoiceChat.interimTranscript
+      : legacyVoiceChat.interimTranscript
+  const activeAnalyserNode =
+    voiceTransport === 'realtime'
+      ? realtimeVoiceChat.analyserNode
+      : legacyVoiceChat.analyserNode
+
   if (error) return <Text>{error.message}</Text>
 
   return (
@@ -773,8 +1107,8 @@ export default function ChatScreen() {
       >
         <AudioGradientOrb
           voiceMode={voiceMode}
-          voiceState={voiceChat.state}
-          analyserNode={voiceChat.analyserNode}
+          voiceState={activeVoiceState}
+          analyserNode={activeAnalyserNode}
           width={screenWidth}
           height={screenHeight}
         />
@@ -851,10 +1185,10 @@ export default function ChatScreen() {
       {/* Voice mode overlay */}
       {voiceMode && (
         <VoiceOverlay
-          state={voiceChat.state}
-          interimTranscript={voiceChat.interimTranscript}
+          state={activeVoiceState}
+          interimTranscript={activeVoiceTranscript}
           lastAssistantText={lastAssistantText}
-          analyserNode={voiceChat.analyserNode}
+          analyserNode={activeAnalyserNode}
           toolName={toolActivity.toolName}
           toolState={toolActivity.toolState}
           foodQuery={toolActivity.foodQuery || undefined}

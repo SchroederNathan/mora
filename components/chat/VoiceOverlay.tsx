@@ -1,7 +1,7 @@
 import { ShimmerText } from './ShimmerText'
 import { Text } from '@/components/ui/Text'
 import { colors } from '@/constants/colors'
-import type { VoiceState } from '@/hooks/useVoiceChat'
+import type { VoiceState } from '@/hooks/voiceTypes'
 import { Mic, MicOff, X } from 'lucide-react-native'
 import { Pressable, useColorScheme, View } from 'react-native'
 import { Haptics } from 'react-native-nitro-haptics'
@@ -120,6 +120,17 @@ export function VoiceOverlay({
             </Animated.View>
           )}
 
+          {state === 'connecting' && (
+            <Animated.View entering={FadeIn.duration(300)} style={{ alignItems: 'center' }}>
+              <ShimmerText
+                className="text-base font-medium text-muted"
+                highlightColor={isDark ? '#fafafa' : '#71717a'}
+              >
+                Connecting...
+              </ShimmerText>
+            </Animated.View>
+          )}
+
           {state === 'processing' && (
             <Animated.View entering={FadeIn.duration(300)} style={{ alignItems: 'center' }}>
               <ShimmerText
@@ -128,6 +139,21 @@ export function VoiceOverlay({
               >
                 {getProcessingText(isThinking, toolName, toolState, foodQuery)}
               </ShimmerText>
+            </Animated.View>
+          )}
+
+          {state === 'fallback' && (
+            <Animated.View entering={FadeIn.duration(300)} style={{ alignItems: 'center' }}>
+              <Text
+                style={{
+                  fontSize: 15,
+                  color: mutedColor,
+                  textAlign: 'center',
+                  fontFamily: 'Sentient Variable',
+                }}
+              >
+                Realtime unavailable. Falling back...
+              </Text>
             </Animated.View>
           )}
 
